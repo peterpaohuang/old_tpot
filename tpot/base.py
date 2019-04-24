@@ -109,7 +109,7 @@ class TPOTBase(BaseEstimator):
                  random_state=None, config_dict=None, template='RandomTree',
                  warm_start=False, memory=None, use_dask=False,
                  periodic_checkpoint_folder=None, early_stop=None,
-                 verbosity=0, disable_update_check=False):
+                 verbosity=0, disable_update_check=False, multi_output=False):
         """Set up the genetic programming algorithm for pipeline optimization.
 
         Parameters
@@ -618,7 +618,7 @@ class TPOTBase(BaseEstimator):
         self._setup_toolbox()
 
 
-    def fit(self, features, target, multi_output=False, sample_weight=None, groups=None):
+    def fit(self, features, target, sample_weight=None, groups=None):
         """Fit an optimized machine learning pipeline.
 
         Uses genetic programming to optimize a machine learning pipeline that
@@ -658,7 +658,7 @@ class TPOTBase(BaseEstimator):
         """
         self._fit_init()
         
-        features, target = self._check_dataset(features, target, sample_weight, multi_output=multi_output)
+        features, target = self._check_dataset(features, target, sample_weight, multi_output=self.multi_output)
 
         self.pretest_X, _, self.pretest_y, _ = train_test_split(features,
                                                 target, train_size=min(50, int(0.9*features.shape[0])),
@@ -941,7 +941,7 @@ class TPOTBase(BaseEstimator):
 
         return self.predict(features)
 
-    def score(self, testing_features, testing_target, multi_output=False):
+    def score(self, testing_features, testing_target):
         """Return the score on the given testing data using the user-specified scoring function.
 
         Parameters
@@ -960,7 +960,7 @@ class TPOTBase(BaseEstimator):
         if self.fitted_pipeline_ is None:
             raise RuntimeError('A pipeline has not yet been optimized. Please call fit() first.')
 
-        testing_features, testing_target = self._check_dataset(testing_features, testing_target, multi_output=multi_output, sample_weight=None)
+        testing_features, testing_target = self._check_dataset(testing_features, testing_target, multi_output=self.multi_output, sample_weight=None)
 
         # If the scoring function is a string, we must adjust to use the sklearn
         # scoring interface
@@ -1134,7 +1134,7 @@ class TPOTBase(BaseEstimator):
 
         return self._fitted_imputer.transform(features)
 
-    def _check_dataset(self, features, target, multi_output=False, sample_weight=None):
+    def _check_dataset(self, features, target, sample_weight=None):
         """Check if a dataset has a valid feature set and labels.
 
         Parameters
@@ -1185,7 +1185,7 @@ class TPOTBase(BaseEstimator):
 
         try:
             if target is not None:
-                X, y = check_X_y(features, target, accept_sparse=True, dtype=None, multi_output=multi_output)
+                X, y = check_X_y(features, target, accept_sparse=True, dtype=None, multi_output=self.multi_output)
                 if self._imputed:
                     return X, y
                 else:
