@@ -75,6 +75,9 @@ from .gp_deap import eaMuPlusLambda, mutNodeReplacement, _wrapped_cross_val_scor
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
     from tqdm.autonotebook import tqdm
+import StringIO
+
+from settings import model_stop
 
 # hot patch for Windows: solve the problem of crashing python after Ctrl + C in Windows OS
 # https://github.com/ContinuumIO/anaconda-issues/issues/905
@@ -102,14 +105,14 @@ if sys.platform.startswith('win'):
 class TPOTBase(BaseEstimator):
     """Automatically creates and optimizes machine learning pipelines using GP."""
 
-    def __init__(self, generations=100, population_size=100, offspring_size=None,
+    def __init__(self, train_progress, train_total, model_id, generations=100, population_size=100, offspring_size=None,
                  mutation_rate=0.9, crossover_rate=0.1,
                  scoring=None, cv=5, subsample=1.0, n_jobs=1,
                  max_time_mins=None, max_eval_time_mins=5,
                  random_state=None, config_dict=None, template='RandomTree',
                  warm_start=False, memory=None, use_dask=False,
                  periodic_checkpoint_folder=None, early_stop=None,
-                 verbosity=0, disable_update_check=False, multi_output=False):
+                 verbosity=0, disable_update_check=False):
         """Set up the genetic programming algorithm for pipeline optimization.
 
         Parameters
@@ -283,11 +286,15 @@ class TPOTBase(BaseEstimator):
         self.config_dict = config_dict
         self.template = template
         self.warm_start = warm_start
+        self.model_id = model_id
         self.memory = memory
         self.use_dask = use_dask
         self.verbosity = verbosity
         self.disable_update_check = disable_update_check
         self.random_state = random_state
+
+        self.train_progress = train_progress
+        self.train_total = train_total
 
 
     def _setup_template(self, template):
@@ -657,8 +664,8 @@ class TPOTBase(BaseEstimator):
 
         """
         self._fit_init()
-        
-        features, target = self._check_dataset(features, target, sample_weight, multi_output=self.multi_output)
+        features, target = self._check_dataset(features, target, sample_weight)
+
 
         self.pretest_X, _, self.pretest_y, _ = train_test_split(features,
                                                 target, train_size=min(50, int(0.9*features.shape[0])),
@@ -728,6 +735,7 @@ class TPOTBase(BaseEstimator):
 
         self._pbar = tqdm(total=total_evals, unit='pipeline', leave=False,
                           disable=not (self.verbosity >= 2), desc='Optimization Progress')
+        self.train_total(total_evals)
 
         try:
             with warnings.catch_warnings():
@@ -960,7 +968,7 @@ class TPOTBase(BaseEstimator):
         if self.fitted_pipeline_ is None:
             raise RuntimeError('A pipeline has not yet been optimized. Please call fit() first.')
 
-        testing_features, testing_target = self._check_dataset(testing_features, testing_target, multi_output=self.multi_output, sample_weight=None)
+        testing_features, testing_target = self._check_dataset(testing_features, testing_target, sample_weight=None)
 
         # If the scoring function is a string, we must adjust to use the sklearn
         # scoring interface
@@ -1185,7 +1193,7 @@ class TPOTBase(BaseEstimator):
 
         try:
             if target is not None:
-                X, y = check_X_y(features, target, accept_sparse=True, dtype=None, multi_output=self.multi_output)
+                X, y = check_X_y(features, target, accept_sparse=True, dtype=None)
                 if self._imputed:
                     return X, y
                 else:
@@ -1312,10 +1320,10 @@ class TPOTBase(BaseEstimator):
         """
         # Evaluate the individuals with an invalid fitness
         individuals = [ind for ind in population if not ind.fitness.valid]
-
         # update pbar for valid individuals (with fitness values)
         if self.verbosity > 0:
             self._pbar.update(len(population)-len(individuals))
+            self.train_progress(len(population)-len(individuals))
 
         operator_counts, eval_individuals_str, sklearn_pipeline_list, stats_dicts = self._preprocess_individuals(individuals)
 
@@ -1429,6 +1437,7 @@ class TPOTBase(BaseEstimator):
         # update self._pbar.total
         if not (self.max_time_mins is None) and not self._pbar.disable and self._pbar.total <= self._pbar.n:
             self._pbar.total += self._lambda
+            self.train_total(self._lambda)
         # Check we do not evaluate twice the same individual in one pass.
         _, unique_individual_indices = np.unique([str(ind) for ind in individuals], return_index=True)
         unique_individuals = [ind for i, ind in enumerate(individuals) if i in unique_individual_indices]
@@ -1537,7 +1546,10 @@ class TPOTBase(BaseEstimator):
                 self._pbar.write(pbar_msg, file=self._file)
             if not self._pbar.disable:
                 self._pbar.update(pbar_num)
-
+                self.train_progress(pbar_num)
+                
+                if self.model_id in model_stop:
+                    raise ValueError('INTENTIONAL STOP TRAINING')
     @_pre_test
     def _mate_operator(self, ind1, ind2):
         for _ in range(self._max_mut_loops):
